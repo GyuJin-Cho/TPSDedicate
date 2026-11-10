@@ -1,0 +1,7 @@
+# 소스 전용 레포: 아래에 나열한 항목만 추적 (Content 등 에셋은 Git LFS 도입 전까지 제외)
+/*
+!/.gitignore
+!/DedicateTPS.uproject
+!/RunServer.bat
+!/Source/
+!/Config/

@@ -1,0 +1,22 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "{23007FAF-485A-1E02-F218-6DA72995F9ED}",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "DedicateTPS",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		}
+	]
+}
