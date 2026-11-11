@@ -19,7 +19,7 @@ class DEDICATETPS_API ATPSCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-	ATPSCharacter();
+	ATPSCharacter(const FObjectInitializer& ObjectInitializer);
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
@@ -38,6 +38,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Aim")
 	float GetAimPitch() const;
 
+	// 로컬/서버는 CMC 상태, 시뮬레이티드 프록시는 복제값을 반환
+	UFUNCTION(BlueprintPure, Category = "Sprint")
+	bool IsSprinting() const;
+
+	// 서버 전용. UTPSCharacterMovementComponent가 매 이동 후 호출
+	void SetReplicatedSprinting(bool bNewSprinting);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void NotifyControllerChanged() override;
@@ -49,6 +56,8 @@ protected:
 	void OnVerticalLook(float InAxis);
 	void StartFire();
 	void StopFire();
+	void StartSprint();
+	void StopSprint();
 
 	// ---------- Fire ----------
 	void FireOnce();
@@ -125,6 +134,10 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_IsDead, BlueprintReadOnly, Category = "Health")
 	bool bIsDead = false;
+
+	// 소유 클라는 CMC로 직접 알고 있으므로 SkipOwner
+	UPROPERTY(Replicated)
+	bool bReplicatedSprinting = false;
 
 private:
 	float GetFireInterval() const { return 60.f / FMath::Max(RoundsPerMinute, 1.f); }

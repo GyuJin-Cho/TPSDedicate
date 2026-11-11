@@ -15,11 +15,21 @@
 #include "TimerManager.h"
 #include "DedicateTPS/Game/TPSGameMode.h"
 #include "DedicateTPS/Utill/CHelpers.h"
+#include "DedicateTPS/Utill/Utill.h"
+#include "TPSCharacterMovementComponent.h"
 
-ATPSCharacter::ATPSCharacter()
+ATPSCharacter::ATPSCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UTPSCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	// Basic 즉 기본 컴포넌드 없을경우 return
+	if(!IsValid(GetCapsuleComponent()) || !IsValid(GetCharacterMovement()) || !IsValid(GetMesh()))
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() Basic Not Valid"));
+		return;
+	}
+	
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 94.f);
 
 	// 조준 방향으로 몸을 돌리는 슈터 방식
@@ -31,19 +41,49 @@ ATPSCharacter::ATPSCharacter()
 	GetCharacterMovement()->MaxWalkSpeed = 400.f;
 
 	USkeletalMesh* MeshAsset = nullptr;
-	CHelpers::GetAsset<USkeletalMesh>(&MeshAsset, TEXT("/Script/Engine.SkeletalMesh'/Game/SCK_Casual01/Models/Premade_Characters/MESH_PC_01.MESH_PC_01'"));
+	CHelpers::GetAsset<USkeletalMesh>(&MeshAsset, TEXT("/Script/Engine.SkeletalMesh'/Game/SCK_Casual01/Models/Premade_Characters/MESH_PC_02.MESH_PC_02'"));
+	if(!IsValid(MeshAsset))
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() MeshAsset Not Vaild"));
+		return;
+	}
 	GetMesh()->SetSkeletalMeshAsset(MeshAsset);
 	GetMesh()->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -94.f), FRotator(0.f, -90.f, 0.f));
-
+	
+	TSubclassOf<UAnimInstance> AnimInstanceClass;
+	CHelpers::GetClass<UAnimInstance>(&AnimInstanceClass, "/Game/Player/ABP_IK/ABP_MainPlayer.ABP_MainPlayer_C");
+	if(!AnimInstanceClass->IsAsset())
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() AnimInstanceClass Not Vaild"));
+		return;
+	}
+	
+	GetMesh()->SetAnimInstanceClass(AnimInstanceClass);
 	CHelpers::CreateComponent(this, &CameraBoom, "CameraBoom", GetCapsuleComponent());
+	if (!IsValid(CameraBoom))
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() CameraBoom Not Vaild"));
+		return;
+	}
+	
 	CameraBoom->TargetArmLength = 300.f;
 	CameraBoom->SocketOffset = FVector(0.f, 60.f, 60.f);
 	CameraBoom->bUsePawnControlRotation = true;
 
 	CHelpers::CreateComponentSocket(this, &FollowCamera, "FollowCamera", USpringArmComponent::SocketName, CameraBoom.Get());
+	if (!IsValid(FollowCamera))
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() FollowCamera Not Vaild"));
+		return;
+	}
 	FollowCamera->bUsePawnControlRotation = false;
 
 	CHelpers::CreateComponent(this, &WeaponMesh, "WeaponMesh", GetMesh());
+	if (!IsValid(WeaponMesh))
+	{
+		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() WeaponMesh Not Vaild"));
+		return;
+	}
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
@@ -53,6 +93,7 @@ void ATPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 
 	DOREPLIFETIME(ATPSCharacter, Health);
 	DOREPLIFETIME(ATPSCharacter, bIsDead);
+	DOREPLIFETIME_CONDITION(ATPSCharacter, bReplicatedSprinting, COND_SkipOwner);
 }
 
 void ATPSCharacter::BeginPlay()
@@ -95,6 +136,8 @@ void ATPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	PlayerInputComponent->BindAxis("LookUpRate", this, &ATPSCharacter::OnVerticalLook);
 	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ATPSCharacter::StartSprint);
+	PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ATPSCharacter::StopSprint);
 
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!EIC) return;
@@ -135,6 +178,42 @@ void ATPSCharacter::OnVerticalLook(float InAxis)
 float ATPSCharacter::GetAimPitch() const
 {
 	return FRotator::NormalizeAxis(GetBaseAimRotation().Pitch);
+}
+
+// ---------------------------------------------------------------- Sprint
+
+void ATPSCharacter::StartSprint()
+{
+	if (bIsDead) return;
+
+	if (UTPSCharacterMovementComponent* CMC = Cast<UTPSCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		CMC->bWantsToSprint = true;
+	}
+}
+
+void ATPSCharacter::StopSprint()
+{
+	if (UTPSCharacterMovementComponent* CMC = Cast<UTPSCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		CMC->bWantsToSprint = false;
+	}
+}
+
+bool ATPSCharacter::IsSprinting() const
+{
+	if (GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		return bReplicatedSprinting;
+	}
+
+	const UTPSCharacterMovementComponent* CMC = Cast<UTPSCharacterMovementComponent>(GetCharacterMovement());
+	return CMC && CMC->IsSprinting();
+}
+
+void ATPSCharacter::SetReplicatedSprinting(bool bNewSprinting)
+{
+	bReplicatedSprinting = bNewSprinting;
 }
 
 // ---------------------------------------------------------------- Fire
@@ -280,6 +359,7 @@ void ATPSCharacter::OnRep_IsDead()
 void ATPSCharacter::HandleDeathCosmetic()
 {
 	StopFire();
+	StopSprint();
 
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
