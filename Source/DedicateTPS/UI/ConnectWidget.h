@@ -4,9 +4,6 @@
 #include "Blueprint/UserWidget.h"
 #include "ConnectWidget.generated.h"
 
-class UButton;
-class UTextBlock;
-
 // 매칭 버튼. 레이아웃은 이 클래스를 부모로 한 위젯 BP에서 구성
 UCLASS()
 class DEDICATETPS_API UConnectWidget : public UUserWidget
@@ -27,11 +24,11 @@ protected:
 
 	// 위젯 BP에서 같은 이름의 위젯을 만들면 자동 연결
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> ConnectButton;
+	TObjectPtr<class UButton> ConnectButton;
 
 	// 상태/에러 표시용 (없어도 됨)
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> StatusText;
+	TObjectPtr<class UTextBlock> StatusText;
 
 	UPROPERTY(EditAnywhere, Category = "Connect")
 	FText ButtonLabel = FText::FromString(TEXT("매칭 시작"));

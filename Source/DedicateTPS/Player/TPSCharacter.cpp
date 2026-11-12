@@ -13,7 +13,10 @@
 #include "Net/UnrealNetwork.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
+#include "DedicateTPS/DedicateTPS.h"
 #include "DedicateTPS/Game/TPSGameMode.h"
+#include "DedicateTPS/Weapon/M4Weapon.h"
+#include "DedicateTPS/Weapon/ArmoComponent.h"
 #include "DedicateTPS/Utill/CHelpers.h"
 #include "DedicateTPS/Utill/Utill.h"
 #include "TPSCharacterMovementComponent.h"
@@ -77,14 +80,6 @@ ATPSCharacter::ATPSCharacter(const FObjectInitializer& ObjectInitializer)
 		return;
 	}
 	FollowCamera->bUsePawnControlRotation = false;
-
-	CHelpers::CreateComponent(this, &WeaponMesh, "WeaponMesh", GetMesh());
-	if (!IsValid(WeaponMesh))
-	{
-		ERROR_LOG(TEXT("ATPSCharacter::ATPSCharacter() WeaponMesh Not Vaild"));
-		return;
-	}
-	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ATPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -94,19 +89,81 @@ void ATPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(ATPSCharacter, Health);
 	DOREPLIFETIME(ATPSCharacter, bIsDead);
 	DOREPLIFETIME_CONDITION(ATPSCharacter, bReplicatedSprinting, COND_SkipOwner);
+	DOREPLIFETIME(ATPSCharacter, Weapon);
 }
 
 void ATPSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// BP에서 바꾼 소켓 이름을 반영하기 위해 BeginPlay에서 부착
-	WeaponMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponAttachSocket);
-
 	if (HasAuthority())
 	{
 		Health = MaxHealth;
+		SpawnWeapon();
 	}
+}
+
+void ATPSCharacter::Destroyed()
+{
+	// 무기는 별도 액터라서 캐릭터와 함께 지워야 한다 (사망 후 LifeSpan 만료 포함)
+	if (HasAuthority() && IsValid(Weapon))
+	{
+		Weapon->Destroy();
+	}
+
+	Super::Destroyed();
+}
+
+// ---------------------------------------------------------------- Weapon
+
+void ATPSCharacter::SpawnWeapon()
+{
+	if (!WeaponClass)
+	{
+		WARNING_LOG(TEXT("[Server] ATPSCharacter::SpawnWeapon() WeaponClass not set on %s"), *GetName());
+		return;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	Weapon = GetWorld()->SpawnActor<AM4Weapon>(WeaponClass, GetActorTransform(), SpawnParams);
+	AttachWeapon();
+}
+
+void ATPSCharacter::AttachWeapon()
+{
+	if (!IsValid(Weapon)) return;
+
+	if (!GetMesh()->DoesSocketExist(WeaponAttachSocket))
+	{
+		WARNING_LOG(TEXT("ATPSCharacter::AttachWeapon() socket '%s' not found on character mesh"), *WeaponAttachSocket.ToString());
+	}
+
+	Weapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponAttachSocket);
+}
+
+void ATPSCharacter::OnRep_Weapon()
+{
+	// 부착은 엔진이 복제하지만, 무기와 캐릭터의 도착 순서와 상관없이 맞추기 위해 클라에서도 붙인다
+	AttachWeapon();
+}
+
+void ATPSCharacter::Reload()
+{
+	if (bIsDead) return;
+
+	StopFire();
+	ServerReload();
+}
+
+void ATPSCharacter::ServerReload_Implementation()
+{
+	if (bIsDead || !IsValid(Weapon)) return;
+
+	Weapon->SetArmo();
 }
 
 void ATPSCharacter::NotifyControllerChanged()
@@ -138,6 +195,7 @@ void ATPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
 	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ATPSCharacter::StartSprint);
 	PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ATPSCharacter::StopSprint);
+	PlayerInputComponent->BindAction("Reload", IE_Pressed, this, &ATPSCharacter::Reload);
 
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!EIC) return;
@@ -239,6 +297,13 @@ void ATPSCharacter::FireOnce()
 		return;
 	}
 
+	// 탄약은 복제값 기준. 서버가 다시 검사하므로 지연으로 한두 발 더 연출돼도 판정에는 영향 없음
+	if (!HasArmo())
+	{
+		StopFire();
+		return;
+	}
+
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (LastLocalFireTime >= 0.0 && Now - LastLocalFireTime < GetFireInterval() * 0.95) return;
 	LastLocalFireTime = Now;
@@ -250,11 +315,18 @@ void ATPSCharacter::FireOnce()
 	// 반응성을 위해 로컬에서 먼저 이펙트 재생 (판정은 서버)
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TPSFireLocal), true, this);
+	Params.AddIgnoredActor(Weapon);
 	const FVector TraceEnd = TraceStart + TraceDir * FireRange;
-	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params);
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, COLLISION_WEAPON, Params);
+	Weapon->PlayFireEffects();
 	OnFireCosmetic(GetMuzzleLocation(), bHit ? Hit.ImpactPoint : TraceEnd, bHit);
 
 	ServerFire(TraceStart, TraceDir);
+}
+
+bool ATPSCharacter::HasArmo() const
+{
+	return IsValid(Weapon) && Weapon->GetArmo()->GetArmo() > 0;
 }
 
 void ATPSCharacter::ServerFire_Implementation(FVector_NetQuantize TraceStart, FVector_NetQuantizeNormal TraceDir)
@@ -272,10 +344,14 @@ void ATPSCharacter::ServerFire_Implementation(FVector_NetQuantize TraceStart, FV
 	const FVector Dir = TraceDir.GetSafeNormal();
 	if (Dir.IsNearlyZero()) return;
 
+	// 탄약 검사와 차감은 서버에서만
+	if (!IsValid(Weapon) || !Weapon->GetArmo()->ConsumeArmo()) return;
+
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TPSFireServer), true, this);
+	Params.AddIgnoredActor(Weapon);
 	const FVector TraceEnd = TraceStart + Dir * FireRange;
-	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params);
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, COLLISION_WEAPON, Params);
 
 	if (bHit && Hit.GetActor())
 	{
@@ -294,14 +370,18 @@ void ATPSCharacter::MulticastFireEffects_Implementation(FVector_NetQuantize Impa
 {
 	if (IsLocallyControlled() || GetNetMode() == NM_DedicatedServer) return;
 
+	if (IsValid(Weapon))
+	{
+		Weapon->PlayFireEffects();
+	}
 	OnFireCosmetic(GetMuzzleLocation(), ImpactPoint, bHit);
 }
 
 FVector ATPSCharacter::GetMuzzleLocation() const
 {
-	if (WeaponMesh && WeaponMesh->DoesSocketExist(MuzzleSocket))
+	if (IsValid(Weapon))
 	{
-		return WeaponMesh->GetSocketLocation(MuzzleSocket);
+		return Weapon->GetMuzzleLocation();
 	}
 
 	return GetActorLocation() + GetActorForwardVector() * 50.f + FVector(0.f, 0.f, 50.f);

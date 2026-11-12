@@ -6,8 +6,6 @@
 #include "Animation/AnimInstance.h"
 #include "MainPlayerAnimInstance.generated.h"
 
-class ATPSCharacter;
-
 UCLASS()
 class DEDICATETPS_API UMainPlayerAnimInstance : public UAnimInstance
 {

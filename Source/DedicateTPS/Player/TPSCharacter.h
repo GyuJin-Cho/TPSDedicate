@@ -4,11 +4,6 @@
 #include "GameFramework/Character.h"
 #include "TPSCharacter.generated.h"
 
-class USpringArmComponent;
-class UCameraComponent;
-class UInputMappingContext;
-class UInputAction;
-
 // 서버 권한(Server Authoritative) TPS 캐릭터
 // - 이동: CharacterMovementComponent가 클라 예측 + 서버 보정 처리
 // - 사격: 클라 -> ServerFire RPC -> 서버 라인트레이스/데미지 -> Multicast 이펙트
@@ -45,8 +40,12 @@ public:
 	// 서버 전용. UTPSCharacterMovementComponent가 매 이동 후 호출
 	void SetReplicatedSprinting(bool bNewSprinting);
 
+	UFUNCTION(BlueprintPure, Category = "Weapon")
+	class AM4Weapon* GetWeapon() const { return Weapon; }
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void Destroyed() override;
 	virtual void NotifyControllerChanged() override;
 
 	// ---------- Input ----------
@@ -58,9 +57,22 @@ protected:
 	void StopFire();
 	void StartSprint();
 	void StopSprint();
+	void Reload();
+
+	// ---------- Weapon ----------
+	// 서버 전용
+	void SpawnWeapon();
+	void AttachWeapon();
+
+	UFUNCTION()
+	void OnRep_Weapon();
+
+	UFUNCTION(Server, Reliable)
+	void ServerReload();
 
 	// ---------- Fire ----------
 	void FireOnce();
+	bool HasArmo() const;
 
 	UFUNCTION(Server, Reliable)
 	void ServerFire(FVector_NetQuantize TraceStart, FVector_NetQuantizeNormal TraceDir);
@@ -93,25 +105,27 @@ protected:
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	TObjectPtr<USpringArmComponent> CameraBoom;
+	TObjectPtr<class USpringArmComponent> CameraBoom;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	TObjectPtr<UCameraComponent> FollowCamera;
+	TObjectPtr<class UCameraComponent> FollowCamera;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
-	TObjectPtr<USkeletalMeshComponent> WeaponMesh;
-
+	// 스폰할 무기 BP (M4Weapon BP 지정)
 	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
-	FName WeaponAttachSocket = TEXT("hand_rSocket");
+	TSubclassOf<class AM4Weapon> WeaponClass;
 
+	// 캐릭터 메시에서 무기를 붙일 소켓
 	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
-	FName MuzzleSocket = TEXT("Muzzle");
+	FName WeaponAttachSocket = TEXT("WeaponSocket");
+
+	UPROPERTY(ReplicatedUsing = OnRep_Weapon, BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<class AM4Weapon> Weapon;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UInputMappingContext> DefaultMappingContext;
+	TObjectPtr<class UInputMappingContext> DefaultMappingContext;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UInputAction> FireAction;
+	TObjectPtr<class UInputAction> FireAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	float Damage = 20.f;
