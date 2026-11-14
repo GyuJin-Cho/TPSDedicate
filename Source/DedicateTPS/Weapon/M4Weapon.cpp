@@ -1,5 +1,5 @@
 #include "M4Weapon.h"
-#include "ArmoComponent.h"
+#include "AmmoComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Particles/ParticleSystemComponent.h"
@@ -21,7 +21,7 @@ AM4Weapon::AM4Weapon()
 	CHelpers::CreateComponent(this, &Mesh, "M4");
 	CHelpers::CreateComponent(this, &Muzzle, "Muzzle", Mesh.Get());
 	CHelpers::CreateComponent(this, &ShellEject, "ShellEject", Mesh.Get());
-	CHelpers::CreateActorComponent(this, &Armo, "Armo");
+	CHelpers::CreateActorComponent(this, &Ammo, "Ammo");
 
 	// 사격 트레이스를 막지 않도록
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -53,9 +53,9 @@ FVector AM4Weapon::GetMuzzleLocation() const
 	return Muzzle->GetComponentLocation();
 }
 
-void AM4Weapon::SetArmo()
+void AM4Weapon::RefillAmmo()
 {
 	if (!HasAuthority()) return;
 
-	Armo->SetArmo(Armo->GetMaxArmo());
+	Ammo->SetAmmo(Ammo->GetMaxAmmo());
 }

@@ -33,6 +33,7 @@ void UMainPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	Falling = Character->GetCharacterMovement()->IsFalling();
 	Die = Character->IsDead();
 	Sprint = Character->IsSprinting();
+	Aim = Character->IsAiming();
 
 	const FRotator Delta = UKismetMathLibrary::NormalizedDeltaRotator(AimRotation, Character->GetActorRotation());
 	const FRotator Interp = FMath::RInterpTo(FRotator(Pitch, Yaw, 0.f), Delta, DeltaSeconds, 5.f);

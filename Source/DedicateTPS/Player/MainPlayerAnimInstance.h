@@ -24,10 +24,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Sprint;
 
-	// 아래 3개는 ATPSCharacter에 아직 기능이 없어 항상 false (ABP 참조 유지용)
+	// ATPSCharacter::IsAiming(). 원격 캐릭터는 복제된 값
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Aim;
 
+	// 아래 2개는 ATPSCharacter에 대응 기능이 없어 항상 false (ABP 참조 유지용)
+	// 사격 동작은 ATPSCharacter::FireMontage(Slot 노드)로 재생한다
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Fire;
 

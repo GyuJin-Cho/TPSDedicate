@@ -5,9 +5,10 @@
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
-#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraShakeBase.h"
+#include "Animation/AnimMontage.h"
 #include "Engine/DamageEvents.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -16,7 +17,7 @@
 #include "DedicateTPS/DedicateTPS.h"
 #include "DedicateTPS/Game/TPSGameMode.h"
 #include "DedicateTPS/Weapon/M4Weapon.h"
-#include "DedicateTPS/Weapon/ArmoComponent.h"
+#include "DedicateTPS/Weapon/AmmoComponent.h"
 #include "DedicateTPS/Utill/CHelpers.h"
 #include "DedicateTPS/Utill/Utill.h"
 #include "TPSCharacterMovementComponent.h"
@@ -24,7 +25,8 @@
 ATPSCharacter::ATPSCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UTPSCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// 조준 카메라 보간용. 로컬 조종 캐릭터만 실제로 일한다
+	PrimaryActorTick.bCanEverTick = true;
 
 	// Basic 즉 기본 컴포넌드 없을경우 return
 	if(!IsValid(GetCapsuleComponent()) || !IsValid(GetCharacterMovement()) || !IsValid(GetMesh()))
@@ -90,16 +92,31 @@ void ATPSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(ATPSCharacter, bIsDead);
 	DOREPLIFETIME_CONDITION(ATPSCharacter, bReplicatedSprinting, COND_SkipOwner);
 	DOREPLIFETIME(ATPSCharacter, Weapon);
+	DOREPLIFETIME_CONDITION(ATPSCharacter, bIsAiming, COND_SkipOwner);
 }
 
 void ATPSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// BP에서 바꾼 값을 평소 상태로 사용
+	DefaultArmLength = CameraBoom->TargetArmLength;
+	DefaultFieldOfView = FollowCamera->FieldOfView;
+
 	if (HasAuthority())
 	{
 		Health = MaxHealth;
 		SpawnWeapon();
+	}
+}
+
+void ATPSCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (IsLocallyControlled())
+	{
+		UpdateAimCamera(DeltaSeconds);
 	}
 }
 
@@ -163,23 +180,7 @@ void ATPSCharacter::ServerReload_Implementation()
 {
 	if (bIsDead || !IsValid(Weapon)) return;
 
-	Weapon->SetArmo();
-}
-
-void ATPSCharacter::NotifyControllerChanged()
-{
-	Super::NotifyControllerChanged();
-
-	if (APlayerController* PC = Cast<APlayerController>(Controller))
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-		{
-			if (DefaultMappingContext)
-			{
-				Subsystem->AddMappingContext(DefaultMappingContext, 0);
-			}
-		}
-	}
+	Weapon->RefillAmmo();
 }
 
 void ATPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -196,15 +197,10 @@ void ATPSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ATPSCharacter::StartSprint);
 	PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ATPSCharacter::StopSprint);
 	PlayerInputComponent->BindAction("Reload", IE_Pressed, this, &ATPSCharacter::Reload);
-
-	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
-	if (!EIC) return;
-
-	if (FireAction)
-	{
-		EIC->BindAction(FireAction, ETriggerEvent::Started, this, &ATPSCharacter::StartFire);
-		EIC->BindAction(FireAction, ETriggerEvent::Completed, this, &ATPSCharacter::StopFire);
-	}
+	PlayerInputComponent->BindAction("Aim", IE_Pressed, this, &ATPSCharacter::StartAim);
+	PlayerInputComponent->BindAction("Aim", IE_Released, this, &ATPSCharacter::StopAim);
+	PlayerInputComponent->BindAction("Fire", IE_Pressed, this, &ATPSCharacter::StartFire);
+	PlayerInputComponent->BindAction("Fire", IE_Released, this, &ATPSCharacter::StopFire);
 }
 
 void ATPSCharacter::OnMoveForward(float InAxis)
@@ -238,11 +234,62 @@ float ATPSCharacter::GetAimPitch() const
 	return FRotator::NormalizeAxis(GetBaseAimRotation().Pitch);
 }
 
+// ---------------------------------------------------------------- Aim
+
+void ATPSCharacter::StartAim()
+{
+	if (bIsDead || bIsAiming) return;
+
+	// 견착 중에는 달리지 않는다
+	StopSprint();
+	SetAiming(true);
+}
+
+void ATPSCharacter::StopAim()
+{
+	if (!bIsAiming) return;
+
+	StopFire();
+	SetAiming(false);
+}
+
+void ATPSCharacter::SetAiming(bool bNewAiming)
+{
+	bIsAiming = bNewAiming;
+
+	if (!HasAuthority())
+	{
+		ServerSetAiming(bNewAiming);
+	}
+}
+
+void ATPSCharacter::ServerSetAiming_Implementation(bool bNewAiming)
+{
+	if (bIsDead && bNewAiming) return;
+
+	bIsAiming = bNewAiming;
+}
+
+void ATPSCharacter::UpdateAimCamera(float DeltaSeconds)
+{
+	const float TargetArmLength = bIsAiming ? AimArmLength : DefaultArmLength;
+	const float TargetFieldOfView = bIsAiming ? AimFieldOfView : DefaultFieldOfView;
+
+	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArmLength, DeltaSeconds, AimInterpSpeed);
+	FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, TargetFieldOfView, DeltaSeconds, AimInterpSpeed));
+}
+
+void ATPSCharacter::ResetAimCamera()
+{
+	CameraBoom->TargetArmLength = DefaultArmLength;
+	FollowCamera->SetFieldOfView(DefaultFieldOfView);
+}
+
 // ---------------------------------------------------------------- Sprint
 
 void ATPSCharacter::StartSprint()
 {
-	if (bIsDead) return;
+	if (bIsDead || bIsAiming) return;
 
 	if (UTPSCharacterMovementComponent* CMC = Cast<UTPSCharacterMovementComponent>(GetCharacterMovement()))
 	{
@@ -278,7 +325,8 @@ void ATPSCharacter::SetReplicatedSprinting(bool bNewSprinting)
 
 void ATPSCharacter::StartFire()
 {
-	if (bIsDead) return;
+	// 견착하지 않으면 좌클릭해도 쏘지 않는다
+	if (bIsDead || !bIsAiming) return;
 
 	FireOnce();
 	GetWorldTimerManager().SetTimer(FireTimerHandle, this, &ATPSCharacter::FireOnce, GetFireInterval(), true);
@@ -291,14 +339,14 @@ void ATPSCharacter::StopFire()
 
 void ATPSCharacter::FireOnce()
 {
-	if (bIsDead || !IsLocallyControlled())
+	if (bIsDead || !bIsAiming || !IsLocallyControlled())
 	{
 		StopFire();
 		return;
 	}
 
 	// 탄약은 복제값 기준. 서버가 다시 검사하므로 지연으로 한두 발 더 연출돼도 판정에는 영향 없음
-	if (!HasArmo())
+	if (!HasAmmo())
 	{
 		StopFire();
 		return;
@@ -308,7 +356,7 @@ void ATPSCharacter::FireOnce()
 	if (LastLocalFireTime >= 0.0 && Now - LastLocalFireTime < GetFireInterval() * 0.95) return;
 	LastLocalFireTime = Now;
 
-	// 화면 중앙(카메라) 기준으로 조준
+	// 화면 중앙(카메라) 기준으로 조준. 카메라는 ControlRotation을 그대로 바라보므로 크로스헤어 위치가 곧 판정 방향이다
 	const FVector TraceStart = FollowCamera->GetComponentLocation();
 	const FVector TraceDir = GetControlRotation().Vector();
 
@@ -320,32 +368,81 @@ void ATPSCharacter::FireOnce()
 	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, COLLISION_WEAPON, Params);
 	Weapon->PlayFireEffects();
 	OnFireCosmetic(GetMuzzleLocation(), bHit ? Hit.ImpactPoint : TraceEnd, bHit);
+	PlayFireMontage();
 
 	ServerFire(TraceStart, TraceDir);
+
+	// 이번 탄은 이미 보냈으므로 반동은 다음 탄부터 적용된다
+	ApplyRecoil();
 }
 
-bool ATPSCharacter::HasArmo() const
+void ATPSCharacter::ApplyRecoil()
 {
-	return IsValid(Weapon) && Weapon->GetArmo()->GetArmo() > 0;
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC) return;
+
+	// AddControllerPitchInput은 입력 스케일이 곱해지므로 각도를 직접 더한다
+	FRotator ControlRotation = PC->GetControlRotation();
+	ControlRotation.Pitch += FMath::FRandRange(RecoilPitchMin, RecoilPitchMax);
+	ControlRotation.Yaw += FMath::FRandRange(-RecoilYawMax, RecoilYawMax);
+	PC->SetControlRotation(ControlRotation);
+
+	if (FireCameraShake && PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->StartCameraShake(FireCameraShake);
+	}
+}
+
+void ATPSCharacter::PlayFireMontage()
+{
+	if (FireMontage)
+	{
+		PlayAnimMontage(FireMontage);
+	}
+}
+
+bool ATPSCharacter::HasAmmo() const
+{
+	return IsValid(Weapon) && Weapon->GetAmmo()->GetAmmo() > 0;
 }
 
 void ATPSCharacter::ServerFire_Implementation(FVector_NetQuantize TraceStart, FVector_NetQuantizeNormal TraceDir)
 {
-	if (bIsDead) return;
+	// ServerSetAiming이 같은 Reliable 순서로 먼저 도착하므로 정상 클라는 여기서 걸리지 않는다
+	if (bIsDead || !bIsAiming)
+	{
+		WARNING_LOG(TEXT("[Server] ServerFire rejected (%s): dead=%d aiming=%d"), *GetName(), bIsDead, bIsAiming);
+		return;
+	}
 
-	// 연사 속도 검증 (네트워크 지터 감안해 약간 여유)
+	// 연사 속도 검증. 서버 틱(약 21Hz)에 RPC가 몰려 도착해도 FireTimeSlack만큼은 허용하고,
+	// 평균 속도는 연사 간격을 넘지 못하게 한다
+	constexpr double FireTimeSlack = 0.1;
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (LastServerFireTime >= 0.0 && Now - LastServerFireTime < GetFireInterval() * 0.8) return;
-	LastServerFireTime = Now;
+	if (Now < NextServerFireTime - FireTimeSlack)
+	{
+		WARNING_LOG(TEXT("[Server] ServerFire rejected (%s): fire rate"), *GetName());
+		return;
+	}
+	NextServerFireTime = FMath::Max(NextServerFireTime, Now - FireTimeSlack) + GetFireInterval();
 
 	// 시작점이 캐릭터에서 너무 멀면 조작된 요청으로 간주
-	if (FVector::DistSquared(TraceStart, GetActorLocation()) > FMath::Square(600.f)) return;
+	const float StartDistance = FVector::Dist(TraceStart, GetActorLocation());
+	if (StartDistance > 600.f)
+	{
+		WARNING_LOG(TEXT("[Server] ServerFire rejected (%s): trace start too far (%.0f)"), *GetName(), StartDistance);
+		return;
+	}
 
 	const FVector Dir = TraceDir.GetSafeNormal();
 	if (Dir.IsNearlyZero()) return;
 
 	// 탄약 검사와 차감은 서버에서만
-	if (!IsValid(Weapon) || !Weapon->GetArmo()->ConsumeArmo()) return;
+	if (!IsValid(Weapon) || !Weapon->GetAmmo()->ConsumeAmmo())
+	{
+		WARNING_LOG(TEXT("[Server] ServerFire rejected (%s): no weapon or no ammo"), *GetName());
+		return;
+	}
 
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TPSFireServer), true, this);
@@ -375,6 +472,7 @@ void ATPSCharacter::MulticastFireEffects_Implementation(FVector_NetQuantize Impa
 		Weapon->PlayFireEffects();
 	}
 	OnFireCosmetic(GetMuzzleLocation(), ImpactPoint, bHit);
+	PlayFireMontage();
 }
 
 FVector ATPSCharacter::GetMuzzleLocation() const
@@ -440,6 +538,10 @@ void ATPSCharacter::HandleDeathCosmetic()
 {
 	StopFire();
 	StopSprint();
+
+	// 서버와 각 클라에서 직접 끈다 (사망 후에는 컨트롤러가 떨어져 Tick 보간이 멈추므로 카메라도 바로 되돌린다)
+	bIsAiming = false;
+	ResetAimCamera();
 
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();

@@ -22,4 +22,11 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<class UUserWidget> MatchStatusWidget;
+
+	// 체력/탄약/크로스헤어. 생성자에서 MainHudWidget_BP(부모 UMainHudWidget)를 경로로 불러온다
+	UPROPERTY(EditDefaultsOnly, Category = "UI")
+	TSubclassOf<class UUserWidget> MainHudWidgetClass;
+
+	UPROPERTY()
+	TObjectPtr<class UUserWidget> MainHudWidget;
 };
