@@ -4,8 +4,9 @@
 #include "GameFramework/GameMode.h"
 #include "TPSGameMode.generated.h"
 
-// 서버에만 존재하는 게임 규칙 (매칭 대기, 접속 관리, 킬 처리, 리스폰)
-// 흐름 : WaitingToStart (인원 대기) -> InProgress (경기) -> 인원 부족 시 맵 재시작 -> WaitingToStart
+// 서버에만 존재하는 게임 규칙 (매칭 대기, 접속 관리, 킬 처리)
+// 흐름 : WaitingToStart (인원 대기) -> InProgress (경기) -> 첫 킬 또는 인원 부족 시 종료 -> 맵 재시작 -> WaitingToStart
+// 승패는 첫 킬로 결정하고 경기 중 리스폰은 없다
 UCLASS()
 class DEDICATETPS_API ATPSGameMode : public AGameMode
 {
@@ -30,9 +31,13 @@ protected:
 	virtual void HandleMatchHasStarted() override;
 	virtual void HandleMatchHasEnded() override;
 
-	void RespawnPlayer(TWeakObjectPtr<AController> Controller);
-
 	void AssignStartSlot(APlayerController* NewPlayer);
+
+	// 1:1 기준으로 Exclude가 아닌 플레이어 (없으면 nullptr)
+	class APlayerState* FindOtherPlayer(const class APlayerState* Exclude) const;
+
+	// 승자를 GameState에 기록하고 경기 종료
+	void EndMatchWithWinner(class APlayerState* WinnerPS);
 
 	// 지금 입장할 수 없는 사유 (입장 가능하면 빈 문자열)
 	FString GetJoinRejectReason() const;
@@ -40,9 +45,6 @@ protected:
 	// 이 인원이 모이면 경기 시작
 	UPROPERTY(EditDefaultsOnly, Category = "Rules")
 	int32 RequiredPlayers = 2;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Rules")
-	float RespawnDelay = 3.f;
 
 	// 경기 종료 후 맵을 다시 불러와 다음 매칭을 받기까지의 시간
 	UPROPERTY(EditDefaultsOnly, Category = "Rules")

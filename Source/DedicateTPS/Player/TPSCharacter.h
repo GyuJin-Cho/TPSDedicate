@@ -38,6 +38,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Aim")
 	bool IsAiming() const { return bIsAiming; }
 
+	UFUNCTION(BlueprintPure, Category = "Reload")
+	bool IsReloading() const { return bIsReloading; }
+
 	// 로컬/서버는 CMC 상태, 시뮬레이티드 프록시는 복제값을 반환
 	UFUNCTION(BlueprintPure, Category = "Sprint")
 	bool IsSprinting() const;
@@ -53,6 +56,9 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void Destroyed() override;
 
+	// 기본 구현은 Die 없이 Destroy만 해서 경기가 끝나지 않으므로, 살아 있으면 사망으로 처리한다
+	virtual void FellOutOfWorld(const class UDamageType& DmgType) override;
+
 	// ---------- Input ----------
 	void OnMoveForward(float InAxis);
 	void OnMoveRight(float InAxis);
@@ -65,6 +71,9 @@ protected:
 	void StartSprint();
 	void StopSprint();
 	void Reload();
+
+	// 로컬 전용. 액션에 묶인 키가 지금 눌려 있는지 (Pressed 이벤트를 놓친 경우 이어서 시작하기 위함)
+	bool IsActionHeld(FName ActionName) const;
 
 	// ---------- Aim ----------
 	// 로컬에서 바로 적용하고 서버에 알림
@@ -86,8 +95,27 @@ protected:
 	UFUNCTION()
 	void OnRep_Weapon();
 
+	// ---------- Reload ----------
+	// 소유 클라는 입력 즉시 재생하고 서버에 알린다. 서버는 다시 검사한 뒤 같은 흐름을 탄다
 	UFUNCTION(Server, Reliable)
 	void ServerReload();
+
+	bool CanReload() const;
+
+	// 소유 클라와 서버 공통. 상태 설정, 몽타주 재생, 타이머 시작 (탄약 채우기는 서버만)
+	void StartReload();
+	void FinishReload();
+	void CancelReload();
+
+	// 서버 전용. ReloadAmmo 노티파이 시점에 호출
+	void ReloadAmmo();
+
+	// 몽타주 재생 시간 / ReloadAmmo 노티파이 시간 (RateScale 반영, 몽타주가 없으면 0)
+	float GetReloadDuration() const;
+	float GetReloadAmmoTime() const;
+
+	UFUNCTION()
+	void OnRep_IsReloading();
 
 	// ---------- Fire ----------
 	void FireOnce();
@@ -109,6 +137,16 @@ protected:
 	void OnFireCosmetic(const FVector& MuzzleLocation, const FVector& ImpactPoint, bool bHit);
 
 	FVector GetMuzzleLocation() const;
+
+	// 스프링암이 카메라 위치를 계산하는 기준점 (카메라 충돌 검사도 여기서 시작한다)
+	FVector GetCameraPivot() const;
+
+	// 서버가 허용하는 기준점~TraceStart 최대 거리 (가장 긴 팔 길이 + 소켓 오프셋 + 네트워크 위치 오차)
+	float GetMaxTraceStartDistance() const;
+
+	// 카메라(크로스헤어) 방향으로 탄착점을 구한 뒤, 총구에서 그 지점까지 막힌 곳이 있으면 그쪽에 맞은 것으로 처리
+	// 클라 연출과 서버 판정이 같은 함수를 쓴다. 반환값은 무언가에 맞았는지, OutImpact는 맞은 지점 또는 사거리 끝
+	bool TraceShot(const FVector& TraceStart, const FVector& Dir, FHitResult& OutHit, FVector& OutImpact) const;
 
 	// ---------- Health / Death ----------
 	UFUNCTION()
@@ -176,6 +214,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	TObjectPtr<class UAnimMontage> FireMontage;
 
+	// 재장전 몽타주. 탄창이 들어가는 프레임에 "Reload Ammo" 노티파이를 넣는다 (없으면 몽타주 끝에서 채움)
+	// 비우면 재장전이 즉시 끝난다
+	UPROPERTY(EditDefaultsOnly, Category = "Reload")
+	TObjectPtr<class UAnimMontage> ReloadMontage;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	float Damage = 20.f;
 
@@ -206,10 +249,16 @@ protected:
 	UPROPERTY(Replicated)
 	bool bIsAiming = false;
 
+	// 소유 클라는 직접 예측하므로 SkipOwner. 다른 클라는 OnRep에서 몽타주를 재생한다
+	UPROPERTY(ReplicatedUsing = OnRep_IsReloading)
+	bool bIsReloading = false;
+
 private:
 	float GetFireInterval() const { return 60.f / FMath::Max(RoundsPerMinute, 1.f); }
 
 	FTimerHandle FireTimerHandle;
+	FTimerHandle ReloadAmmoTimerHandle;
+	FTimerHandle ReloadEndTimerHandle;
 	double LastLocalFireTime = -1.0;
 
 	// 서버 연사 검증. 평균 연사 속도만 제한하고 서버 틱 때문에 몰려 도착한 RPC는 허용한다

@@ -35,6 +35,9 @@ void UMainPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	Sprint = Character->IsSprinting();
 	Aim = Character->IsAiming();
 
+	// ABP는 Fire || Reload || Aim일 때만 UpperBody 슬롯 분기를 쓰므로, 조준을 푼 재장전 중에도 true여야 몽타주가 보인다
+	Reload = Character->IsReloading();
+
 	const FRotator Delta = UKismetMathLibrary::NormalizedDeltaRotator(AimRotation, Character->GetActorRotation());
 	const FRotator Interp = FMath::RInterpTo(FRotator(Pitch, Yaw, 0.f), Delta, DeltaSeconds, 5.f);
 	Pitch = FMath::ClampAngle(Interp.Pitch, -90.f, 90.f);

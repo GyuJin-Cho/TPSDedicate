@@ -3,7 +3,11 @@
 
 bool UTPSCharacterMovementComponent::IsSprinting() const
 {
-	return bWantsToSprint && IsMovingOnGround() && !IsCrouching();
+	if (!bWantsToSprint || !IsMovingOnGround() || IsCrouching()) return false;
+
+	// 조준 중에는 서버에서도 스프린트를 막는다 (정상 클라는 조준 시 StopSprint로 플래그를 끄므로 보정이 생기지 않는다)
+	const ATPSCharacter* TPSCharacter = Cast<ATPSCharacter>(CharacterOwner);
+	return !(TPSCharacter && TPSCharacter->IsAiming());
 }
 
 float UTPSCharacterMovementComponent::GetMaxSpeed() const

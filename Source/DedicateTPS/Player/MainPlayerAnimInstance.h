@@ -28,11 +28,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Aim;
 
-	// 아래 2개는 ATPSCharacter에 대응 기능이 없어 항상 false (ABP 참조 유지용)
-	// 사격 동작은 ATPSCharacter::FireMontage(Slot 노드)로 재생한다
+	// ATPSCharacter에 대응 기능이 없어 항상 false (ABP 참조 유지용)
+	// 사격 동작은 ATPSCharacter::FireMontage(Slot 노드)로 재생하고, 사격은 조준 중에만 되므로 Aim으로 충분하다
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Fire;
 
+	// ATPSCharacter::IsReloading(). ABP의 UpperBody 슬롯 분기 조건(Fire || Reload || Aim)에 쓰인다
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	bool Reload;
 

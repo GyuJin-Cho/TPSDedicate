@@ -4,6 +4,8 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/GameMode.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "DedicateTPS/Game/TPSGameState.h"
 
 void UMatchStatusWidget::NativeOnInitialized()
@@ -58,6 +60,12 @@ FString UMatchStatusWidget::BuildStatusMessage() const
 
 	if (State == MatchState::WaitingPostMatch)
 	{
+		// 킬이나 상대 이탈로 승자가 정해지면 승패만 표시. 승자가 없을 때(둘 다 나간 경우 등)만 기존 안내
+		if (GS->HasWinner())
+		{
+			const APlayerController* PC = GetOwningPlayer();
+			return PC && GS->IsWinner(PC->PlayerState) ? TEXT("승리") : TEXT("패배");
+		}
 		return TEXT("경기 종료 - 잠시 후 다시 매칭합니다");
 	}
 

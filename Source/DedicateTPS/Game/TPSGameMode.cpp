@@ -2,6 +2,7 @@
 #include "TPSGameState.h"
 #include "TPSPlayerState.h"
 #include "TPSPlayerController.h"
+#include "DedicateTPS/Player/TPSCharacter.h"
 #include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
@@ -76,16 +77,18 @@ void ATPSGameMode::PostLogin(APlayerController* NewPlayer)
 
 void ATPSGameMode::Logout(AController* Exiting)
 {
-	const FString Name = Exiting && Exiting->PlayerState ? Exiting->PlayerState->GetPlayerName() : TEXT("Unknown");
+	// Super 이후에는 PlayerState가 비활성 목록으로 옮겨질 수 있으므로 먼저 잡아 둔다 (PlayerArray에서 빠지는 건 컨트롤러 파괴 시점)
+	const APlayerState* ExitingPS = Exiting ? Exiting->PlayerState.Get() : nullptr;
+	const FString Name = ExitingPS ? ExitingPS->GetPlayerName() : TEXT("Unknown");
 
 	Super::Logout(Exiting);
 
 	INFO_LOG(TEXT("[Server] Leave : %s (%d/%d)"), *Name, NumPlayers, RequiredPlayers);
 
-	// 경기 중 인원이 모자라면 경기 종료
+	// 경기 중 상대가 나가면 남은 사람의 승리
 	if (IsMatchInProgress() && NumPlayers < RequiredPlayers)
 	{
-		EndMatch();
+		EndMatchWithWinner(FindOtherPlayer(ExitingPS));
 	}
 }
 
@@ -133,6 +136,10 @@ AActor* ATPSGameMode::ChoosePlayerStart_Implementation(AController* Player)
 		bool bOccupied = false;
 		for (TActorIterator<APawn> PawnIt(GetWorld()); PawnIt; ++PawnIt)
 		{
+			// 시체는 캡슐 충돌이 꺼져 있어 스폰을 막지 않으므로 점유로 보지 않는다
+			const ATPSCharacter* TPSCharacter = Cast<ATPSCharacter>(*PawnIt);
+			if (TPSCharacter && TPSCharacter->IsDead()) continue;
+
 			if (FVector::DistSquared(PawnIt->GetActorLocation(), Start->GetActorLocation()) < FMath::Square(150.f))
 			{
 				bOccupied = true;
@@ -206,25 +213,39 @@ void ATPSGameMode::OnPlayerKilled(AController* Victim, AController* Killer)
 		Killer && Killer->PlayerState ? *Killer->PlayerState->GetPlayerName() : TEXT("World"),
 		Victim && Victim->PlayerState ? *Victim->PlayerState->GetPlayerName() : TEXT("Unknown"));
 
-	if (Victim)
+	// 첫 킬로 승패 결정. 경기 종료 후에 나온 킬은 무시
+	if (!IsMatchInProgress()) return;
+
+	// 자살/낙사처럼 킬러가 없으면 살아남은 쪽이 승자
+	APlayerState* WinnerPS = Killer && Killer != Victim ? Killer->PlayerState.Get() : nullptr;
+	if (!WinnerPS)
 	{
-		FTimerHandle Handle;
-		GetWorldTimerManager().SetTimer(Handle,
-			FTimerDelegate::CreateUObject(this, &ATPSGameMode::RespawnPlayer, TWeakObjectPtr<AController>(Victim)),
-			RespawnDelay, false);
+		WinnerPS = FindOtherPlayer(Victim ? Victim->PlayerState.Get() : nullptr);
 	}
+
+	EndMatchWithWinner(WinnerPS);
 }
 
-void ATPSGameMode::RespawnPlayer(TWeakObjectPtr<AController> Controller)
+APlayerState* ATPSGameMode::FindOtherPlayer(const APlayerState* Exclude) const
 {
-	// 리스폰 대기 중 나갔거나 경기가 끝났으면 무시
-	if (!Controller.IsValid() || !IsMatchInProgress()) return;
+	if (!GameState) return nullptr;
 
-	if (APawn* OldPawn = Controller->GetPawn())
+	// 1:1이므로 제외한 사람이 아닌 첫 번째 플레이어가 상대
+	for (APlayerState* PS : GameState->PlayerArray)
 	{
-		Controller->UnPossess();
-		OldPawn->Destroy();
+		if (PS && PS != Exclude) return PS;
+	}
+	return nullptr;
+}
+
+void ATPSGameMode::EndMatchWithWinner(APlayerState* WinnerPS)
+{
+	if (ATPSGameState* GS = GetGameState<ATPSGameState>())
+	{
+		GS->SetWinner(WinnerPS);
 	}
 
-	RestartPlayer(Controller.Get());
+	INFO_LOG(TEXT("[Server] Winner : %s"), WinnerPS ? *WinnerPS->GetPlayerName() : TEXT("None"));
+
+	EndMatch();
 }
