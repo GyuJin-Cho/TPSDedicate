@@ -37,9 +37,9 @@ flowchart LR
 | 폴더 | 내용 |
 |---|---|
 | `Source/DedicateTPS/Game` | GameMode(매치 수명주기, 입장 검사, 스폰), GameState(승자 복제), PlayerState, GameInstance(접속 실패 처리) |
-| `Source/DedicateTPS/Player` | 캐릭터(사격·조준·재장전·체력), 커스텀 이동 컴포넌트(스프린트 예측), 애님 인스턴스 |
+| `Source/DedicateTPS/Player` | 캐릭터(사격·조준·재장전·체력·부위 데미지·피 이펙트), 커스텀 이동 컴포넌트(스프린트 예측), 애님 인스턴스 |
 | `Source/DedicateTPS/Weapon` | 무기 연출, 탄약 컴포넌트 |
-| `Source/DedicateTPS/UI` | 접속 화면, HUD, 경기 상태 위젯 |
+| `Source/DedicateTPS/UI` | 접속 화면, HUD(헤드샷 표시 포함), 경기 상태 위젯 |
 
 ## 네트워크에서 신경 쓴 부분
 
@@ -56,6 +56,20 @@ flowchart LR
 | 총구 → 탄착점 2차 트레이스 | 카메라로는 보이지만 총구가 막힌 코너 피킹 |
 | 탄약 차감은 서버에서만 | 무한 탄약 |
 
+**맞은 부위에 따라 데미지가 다릅니다.**
+머리는 ×5(한 발에 처치), 몸통은 ×1, 팔다리는 ×0.5입니다. 피격 판정은 캡슐로 하고, 부위는 서버가 총알 경로와 본 위치를 비교해 정합니다. 연출은 받는 쪽을 나눴습니다.
+
+```mermaid
+flowchart LR
+    A["쏜 사람 클라이언트<br/>피 이펙트 먼저 재생"]
+    S["서버<br/>부위 판정 · 데미지"]
+    B["모든 클라이언트<br/>총구 화염 · 피 이펙트"]
+    H["쏜 사람 HUD<br/>HEADSHOT 표시"]
+    A -- "ServerFire" --> S
+    S -- "Multicast (Unreliable)" --> B
+    S -- "머리면 Client RPC (Reliable)" --> H
+```
+
 **스프린트는 이동 예측에 포함했습니다.**
 RPC로 처리하면 서버가 이동을 다른 속도로 재현해 위치 보정(러버밴딩)이 생깁니다. 그래서 `CharacterMovementComponent`의 SavedMove 플래그로 이동 데이터와 함께 보냅니다.
 
@@ -69,6 +83,7 @@ RPC로 처리하면 서버가 이동을 다른 속도로 재현해 위치 보정
 **알고 둔 한계**
 - 지연 보상(서버 되감기)은 없습니다. 2인 게임이라 비용 대비 이득이 작다고 판단해 보류했습니다.
 - 재시작은 non-seamless 트래블이라 경기 간에 상태(라운드 점수 등)가 유지되지 않습니다.
+- PhysicsAsset 기반 메시 판정이 아니라 캡슐 + 본 위치 근사라서, 데디 서버가 몽타주를 재생하지 않는 만큼 부위 경계에서 클라이언트 화면과 판정이 갈릴 수 있습니다.
 
 ## AI 활용 방식
 

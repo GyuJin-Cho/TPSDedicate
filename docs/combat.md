@@ -18,6 +18,8 @@ C++에서 상속 컴포넌트의 클래스를 바꾸면(`SetDefaultSubobjectClas
 
 반동은 `ApplyRecoil`이 사격 직후 ControlRotation에 랜덤 각도를 더하는 방식이다. 카메라가 ControlRotation을 그대로 바라보므로 화면 중앙 크로스헤어(`UMainHudWidget`이 NativePaint로 그림)가 판정 방향과 일치한다. 카메라 셰이크는 화면만 흔들고 판정에는 영향이 없다.
 
+탄이 없을 때 사격하면 `FireOnce`가 `EmptyFireMontage`(BP에서 지정)를 로컬에서만 재생하고 멈춘다. 서버에 보내지 않으므로 다른 클라에는 보이지 않는다. 탄약은 복제값 기준이라 마지막 발 직후 복제가 늦으면 빈 격발 대신 한 발이 더 연출될 수 있다(서버가 거부).
+
 ## 전투 구현 시 주의점
 
 - 사격 트레이스는 전용 채널 `COLLISION_WEAPON`(`ECC_GameTraceChannel1`, `DefaultEngine.ini`에서 기본 Block)을 쓴다. 엔진 기본 프로필의 `Pawn`/`CharacterMesh`는 `ECC_Visibility`를 무시하므로 Visibility로 되돌리면 캐릭터에 맞지 않는다. 판정은 캡슐 기준이고 사망 시 캡슐 충돌이 꺼져 시체가 총알을 막지 않는다.
@@ -26,4 +28,6 @@ C++에서 상속 컴포넌트의 클래스를 바꾸면(`SetDefaultSubobjectClas
 - `ServerFire`의 연사 검증은 평균 속도만 제한한다(`NextServerFireTime` + 여유 시간). 서버 틱에 RPC가 몰려 도착해도 정상 사격이 거부되지 않게 하기 위해서다.
 - `LV_Soul_Slum`의 BlockingVolume(기본 프로필 `InvisibleWall`)은 메시보다 높게 솟은 이동 제한용이라 `DefaultEngine.ini`의 `EditProfiles`로 `InvisibleWall`/`InvisibleWallDynamic`의 Weapon 응답을 Ignore로 바꿨다. 총알은 complex 트레이스로 메시에 맞는다.
 - 판정은 `TraceShot` 하나로 클라 연출과 서버가 같이 쓴다. 카메라 방향 트레이스로 탄착점을 구한 뒤(시작점은 조준선 위에서 기준점 높이까지 앞으로 옮겨, 카메라와 캐릭터 사이에 선 상대가 맞지 않게 한다) 스프링암 기준점(`GetCameraPivot`) → 총구 → 탄착점 사이가 막혔으면 막힌 곳에 맞는다(코너 피킹 방지). 총구 위치를 쓰므로 서버에서도 메시 본을 갱신한다(`AlwaysTickPoseAndRefreshBones`).
+- 부위 데미지(머리 ×5 즉사, 팔다리 ×0.5)는 `TakeDamage`가 포인트 데미지일 때 `GetHitZone`으로 정한다. 메시 충돌(PhysicsAsset)이 없어서, 실제로 맞은 트레이스 방향(`HitInfo.TraceStart`→`TraceEnd`, 2차 검사로 맞으면 카메라 방향과 다르다)으로 총알 경로를 그린 뒤(캡슐 밖으로 나온 조준 팔을 넣으려고 명중 지점보다 캡슐 반지름만큼 앞에서 시작) 본 구간(UE4 마네킹 본 이름)을 반지름을 준 캡슐로 보고 경로가 처음 지나간 부위를 고른다. 머리는 실제로 지나가야 인정하고, 아무 부위도 안 지나간 캡슐 스침은 가장 가까운 몸통/팔다리로 친다. 서버 본 위치를 쓰므로 서버가 몽타주를 재생하지 않는 데서 오는 오차가 그대로 있다. 스켈레톤을 바꾸면 본 이름 표를 고친다. 헤드샷이면 피격자의 `TakeDamage`가 `DamageCauser`(사격자 캐릭터)에 `ClientNotifyHeadshot`을 보내고, `UMainHudWidget`이 `GetLastHeadshotTime()`을 읽어 문구를 그린다. `ServerFire`가 `ApplyPointDamage`의 DamageCauser로 `this`를 넘기는 것을 전제로 한다.
+- 피 이펙트는 맞은 캐릭터의 `BloodNiagara`/`BloodParticle`(BP에서 지정)을 쓴다. 사격자는 로컬 `TraceShot` 결과로 먼저 재생하고, 나머지 클라는 `MulticastFireEffects`의 `HitCharacter`로 재생한다. 서버 판정과 다르면 사격자 화면에만 피가 보일 수 있다.
 - 서버는 `TraceStart`가 기준점에서 `GetMaxTraceStartDistance()`(긴 팔 길이 + `SocketOffset` + 위치 오차)보다 멀면 거부한다. 벽 너머로 옮긴 시작점은 따로 막지 않아도 `TraceShot`의 총구→탄착점 구간에서 벽에 막힌다.

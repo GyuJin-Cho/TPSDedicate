@@ -4,6 +4,15 @@
 #include "GameFramework/Character.h"
 #include "TPSCharacter.generated.h"
 
+// 피격 부위. 판정은 캡슐이고, 부위는 총알 경로와 본 위치로 정한다
+UENUM(BlueprintType)
+enum class EHitZone : uint8
+{
+	Body,
+	Head,
+	Limb,
+};
+
 // 서버 권한(Server Authoritative) TPS 캐릭터
 // - 이동: CharacterMovementComponent가 클라 예측 + 서버 보정 처리
 // - 조준: 우클릭 동안 견착. 조준 중에만 사격 가능 (서버도 bIsAiming으로 다시 검사)
@@ -50,6 +59,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	class AM4Weapon* GetWeapon() const { return Weapon; }
+
+	// 소유 클라 전용. 마지막으로 헤드샷을 맞힌 월드 시간 (없으면 음수). HUD가 표시 시간을 계산할 때 쓴다
+	double GetLastHeadshotTime() const { return LastHeadshotTime; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -125,12 +137,19 @@ protected:
 	void ApplyRecoil();
 	void PlayFireMontage();
 
+	// 로컬 전용. 탄이 없을 때 사격하면 재생 (서버에 보내지 않으므로 다른 클라에는 보이지 않는다)
+	void PlayEmptyFireMontage();
+
 	UFUNCTION(Server, Reliable)
 	void ServerFire(FVector_NetQuantize TraceStart, FVector_NetQuantizeNormal TraceDir);
 
 	// 사격자 본인은 이미 로컬에서 재생했으므로 제외
+	// HitCharacter는 캐릭터를 맞혔을 때만 채운다 (피 이펙트용)
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastFireEffects(FVector_NetQuantize ImpactPoint, bool bHit);
+	void MulticastFireEffects(FVector_NetQuantize ImpactPoint, FVector_NetQuantizeNormal ImpactNormal, bool bHit, ATPSCharacter* HitCharacter);
+
+	// 화면이 있는 쪽 전용. 이 캐릭터가 총에 맞은 지점에 피 이펙트 재생
+	void PlayBloodEffect(const FVector& Location, const FVector& Normal) const;
 
 	// BP에서 총구 화염/사운드/탄흔 처리
 	UFUNCTION(BlueprintImplementableEvent, Category = "Fire")
@@ -154,6 +173,23 @@ protected:
 
 	UFUNCTION()
 	void OnRep_IsDead();
+
+	// 서버 전용. 캡슐에 맞은 총알이 실제로 지나간 부위. 머리는 판정 캡슐을 실제로 지나가야 인정하고,
+	// 어느 부위에도 닿지 않고 캡슐만 스친 경우는 가장 가까운 몸통/팔다리로 본다
+	EHitZone GetHitZone(const FVector& ImpactPoint, const FVector& ShotDir) const;
+	float GetHitZoneMultiplier(EHitZone Zone) const;
+
+	// 메시에 해당 본이 없으면 false
+	bool GetBoneLocation(FName BoneName, FVector& OutLocation) const;
+
+	// 서버 -> 사격자 클라. 헤드샷 표시용. 기본 배율에서는 머리가 즉사라 드물게 보내므로 Reliable로 둔다
+	// (머리 배율을 낮춰도 연사 속도 이하라 부담은 작다)
+	UFUNCTION(Client, Reliable)
+	void ClientNotifyHeadshot();
+
+	// BP에서 헤드샷 사운드 등 추가 연출 (HUD 문구는 UMainHudWidget이 그린다)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Fire")
+	void OnHeadshotConfirmed();
 
 	void Die(AController* Killer);
 	void HandleDeathCosmetic();
@@ -214,10 +250,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	TObjectPtr<class UAnimMontage> FireMontage;
 
+	// 탄이 없는데 사격했을 때 몽타주 (빈 격발). 비우면 재생 안 함
+	UPROPERTY(EditDefaultsOnly, Category = "Fire")
+	TObjectPtr<class UAnimMontage> EmptyFireMontage;
+
 	// 재장전 몽타주. 탄창이 들어가는 프레임에 "Reload Ammo" 노티파이를 넣는다 (없으면 몽타주 끝에서 채움)
 	// 비우면 재장전이 즉시 끝난다
 	UPROPERTY(EditDefaultsOnly, Category = "Reload")
 	TObjectPtr<class UAnimMontage> ReloadMontage;
+
+	// ---------- Blood ----------
+	// 총에 맞았을 때 피 이펙트. Niagara와 Cascade 중 지정한 쪽을 재생한다 (둘 다 지정하면 둘 다)
+	// 맞은 면의 법선 방향(X축)으로 회전해 스폰하므로, 에셋이 +X로 뿜어지면 맞은 쪽(쏜 사람 방향)으로 튄다
+	UPROPERTY(EditDefaultsOnly, Category = "Blood")
+	TObjectPtr<class UNiagaraSystem> BloodNiagara;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Blood")
+	TObjectPtr<class UParticleSystem> BloodParticle;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Blood")
+	FVector BloodScale = FVector(1.f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	float Damage = 20.f;
@@ -231,6 +283,28 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	bool bDrawDebugTrace = false;
+
+	// ---------- Hit Zone ----------
+	// Damage에 곱한다. 기본값은 머리 100(즉사), 몸통 20, 팔다리 10
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float HeadDamageMultiplier = 5.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float LimbDamageMultiplier = 0.5f;
+
+	// 부위별 판정 굵기(반지름, cm). 본 구간을 이 굵기의 캡슐로 본다
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float HeadRadius = 13.f;
+
+	// head 본(목 위쪽 끝)에서 정수리 방향으로 머리 판정을 늘리는 길이
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float HeadLength = 15.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float TorsoRadius = 20.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
+	float LimbRadius = 9.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Health")
 	float MaxHealth = 100.f;
@@ -260,6 +334,7 @@ private:
 	FTimerHandle ReloadAmmoTimerHandle;
 	FTimerHandle ReloadEndTimerHandle;
 	double LastLocalFireTime = -1.0;
+	double LastHeadshotTime = -1.0;
 
 	// 서버 연사 검증. 평균 연사 속도만 제한하고 서버 틱 때문에 몰려 도착한 RPC는 허용한다
 	double NextServerFireTime = 0.0;

@@ -51,6 +51,28 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Crosshair")
 	float CrosshairDotSize = 2.f;
 
+	// ---------- 헤드샷 ----------
+	// 서버가 ClientNotifyHeadshot을 보내면 크로스헤어 위에 잠깐 표시한다 (조준 여부와 무관)
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	FText HeadshotText = FText::FromString(TEXT("HEADSHOT"));
+
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	FLinearColor HeadshotColor = FLinearColor(1.f, 0.2f, 0.15f, 1.f);
+
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	int32 HeadshotFontSize = 28;
+
+	// 화면 중앙에서 글자 아래쪽까지의 거리 (px)
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	float HeadshotOffsetY = 40.f;
+
+	// 전체 표시 시간과, 그중 끝에서 서서히 사라지는 시간 (초)
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	float HeadshotDisplayTime = 1.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Headshot")
+	float HeadshotFadeTime = 0.5f;
+
 private:
 	void BuildDefaultLayout();
 	class UTextBlock* MakeText(const TCHAR* Name, int32 FontSize);
@@ -58,6 +80,9 @@ private:
 	void UpdateHealth(const class ATPSCharacter* Character);
 	void UpdateAmmo(const class ATPSCharacter* Character);
 	bool ShouldDrawCrosshair() const;
+
+	// 표시 중이면 그리고 true
+	bool DrawHeadshotText(const FGeometry& AllottedGeometry, FSlateWindowElementList& OutDrawElements, int32 Layer) const;
 
 	// 값이 바뀔 때만 텍스트를 갱신하기 위한 캐시
 	int32 LastHealth = -1;

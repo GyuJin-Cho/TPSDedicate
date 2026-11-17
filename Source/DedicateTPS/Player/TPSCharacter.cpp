@@ -12,6 +12,9 @@
 #include "Animation/AnimMontage.h"
 #include "Engine/DamageEvents.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "Particles/ParticleSystem.h"
 #include "Net/UnrealNetwork.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
@@ -499,9 +502,14 @@ void ATPSCharacter::FireOnce()
 	}
 
 	// 탄약은 복제값 기준. 서버가 다시 검사하므로 지연으로 한두 발 더 연출돼도 판정에는 영향 없음
+	// 빈 탄창이면 빈 격발 동작만 한 번 하고 멈춘다 (누를 때마다, 또는 연사 중 탄이 떨어진 순간)
 	if (!HasAmmo())
 	{
 		StopFire();
+		if (IsValid(Weapon))
+		{
+			PlayEmptyFireMontage();
+		}
 		return;
 	}
 
@@ -520,6 +528,13 @@ void ATPSCharacter::FireOnce()
 	Weapon->PlayFireEffects();
 	OnFireCosmetic(GetMuzzleLocation(), Impact, bHit);
 	PlayFireMontage();
+
+	// 피도 로컬 판정으로 먼저 보여 준다 (서버 판정과 드물게 다를 수 있다)
+	const ATPSCharacter* HitCharacter = bHit ? Cast<ATPSCharacter>(Hit.GetActor()) : nullptr;
+	if (IsValid(HitCharacter))
+	{
+		HitCharacter->PlayBloodEffect(Impact, Hit.ImpactNormal);
+	}
 
 	ServerFire(TraceStart, TraceDir);
 
@@ -549,6 +564,14 @@ void ATPSCharacter::PlayFireMontage()
 	if (FireMontage)
 	{
 		PlayAnimMontage(FireMontage);
+	}
+}
+
+void ATPSCharacter::PlayEmptyFireMontage()
+{
+	if (EmptyFireMontage)
+	{
+		PlayAnimMontage(EmptyFireMontage);
 	}
 }
 
@@ -608,7 +631,8 @@ void ATPSCharacter::ServerFire_Implementation(FVector_NetQuantize TraceStart, FV
 		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Dir, Hit, GetController(), this, nullptr);
 	}
 
-	MulticastFireEffects(Impact, bHit);
+	ATPSCharacter* HitCharacter = bHit ? Cast<ATPSCharacter>(Hit.GetActor()) : nullptr;
+	MulticastFireEffects(Impact, Hit.ImpactNormal, bHit, HitCharacter);
 }
 
 bool ATPSCharacter::TraceShot(const FVector& TraceStart, const FVector& Dir, FHitResult& OutHit, FVector& OutImpact) const
@@ -628,7 +652,8 @@ bool ATPSCharacter::TraceShot(const FVector& TraceStart, const FVector& Dir, FHi
 	// 2차: 실제 총알은 총구에서 나가므로 기준점 -> 총구 -> 조준 지점 사이가 막혔는지 확인 (코너 피킹, 벽에 붙어 쏘기)
 	// 기준점 -> 총구 구간은 총구가 얇은 벽을 뚫고 나간 경우를 잡는다
 	const FVector Muzzle = GetMuzzleLocation();
-	const FVector Segments[2][2] = { { Pivot, Muzzle }, { Muzzle, OutImpact } };
+	struct FTraceSegment { FVector Start; FVector End; };
+	const FTraceSegment Segments[] = { { Pivot, Muzzle }, { Muzzle, OutImpact } };
 
 	if (bDrawDebugTrace)
 	{
@@ -637,10 +662,10 @@ bool ATPSCharacter::TraceShot(const FVector& TraceStart, const FVector& Dir, FHi
 		DrawDebugSphere(GetWorld(), Muzzle, 5.f, 8, FColor::Yellow, false, 1.f);
 	}
 
-	for (const auto& Segment : Segments)
+	for (const FTraceSegment& Segment : Segments)
 	{
 		FHitResult BlockHit;
-		if (!GetWorld()->LineTraceSingleByChannel(BlockHit, Segment[0], Segment[1], COLLISION_WEAPON, Params)) continue;
+		if (!GetWorld()->LineTraceSingleByChannel(BlockHit, Segment.Start, Segment.End, COLLISION_WEAPON, Params)) continue;
 
 		// 조준한 대상에 먼저 닿은 건 정상 명중 (캡슐을 다른 각도로 들어가면 지점만 조금 다르다)
 		if (bHit && BlockHit.GetActor() == OutHit.GetActor()) break;
@@ -667,7 +692,7 @@ float ATPSCharacter::GetMaxTraceStartDistance() const
 	return FMath::Max(DefaultArmLength, AimArmLength) + CameraBoom->SocketOffset.Size() + PositionTolerance;
 }
 
-void ATPSCharacter::MulticastFireEffects_Implementation(FVector_NetQuantize ImpactPoint, bool bHit)
+void ATPSCharacter::MulticastFireEffects_Implementation(FVector_NetQuantize ImpactPoint, FVector_NetQuantizeNormal ImpactNormal, bool bHit, ATPSCharacter* HitCharacter)
 {
 	if (IsLocallyControlled() || GetNetMode() == NM_DedicatedServer) return;
 
@@ -677,6 +702,27 @@ void ATPSCharacter::MulticastFireEffects_Implementation(FVector_NetQuantize Impa
 	}
 	OnFireCosmetic(GetMuzzleLocation(), ImpactPoint, bHit);
 	PlayFireMontage();
+
+	if (IsValid(HitCharacter))
+	{
+		HitCharacter->PlayBloodEffect(ImpactPoint, ImpactNormal);
+	}
+}
+
+void ATPSCharacter::PlayBloodEffect(const FVector& Location, const FVector& Normal) const
+{
+	if (GetNetMode() == NM_DedicatedServer) return;
+
+	const FRotator Rotation = Normal.IsNearlyZero() ? FRotator::ZeroRotator : Normal.Rotation();
+
+	if (BloodNiagara)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, BloodNiagara, Location, Rotation, BloodScale);
+	}
+	if (BloodParticle)
+	{
+		UGameplayStatics::SpawnEmitterAtLocation(this, BloodParticle, Location, Rotation, BloodScale);
+	}
 }
 
 FVector ATPSCharacter::GetMuzzleLocation() const
@@ -695,8 +741,29 @@ float ATPSCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEv
 {
 	if (!HasAuthority() || bIsDead) return 0.f;
 
+	// 총알(포인트 데미지)은 맞은 부위에 따라 배율 적용
+	bool bHeadshot = false;
+	if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+	{
+		const FPointDamageEvent& PointEvent = static_cast<const FPointDamageEvent&>(DamageEvent);
+		// 실제로 맞은 트레이스의 방향을 쓴다. TraceShot의 2차 검사(기준점 -> 총구 -> 탄착점)에서 맞으면 카메라 방향과 다르다
+		const FVector TraceDelta = PointEvent.HitInfo.TraceEnd - PointEvent.HitInfo.TraceStart;
+		const FVector ShotDir = TraceDelta.IsNearlyZero() ? FVector(PointEvent.ShotDirection) : TraceDelta;
+		const EHitZone Zone = GetHitZone(PointEvent.HitInfo.ImpactPoint, ShotDir);
+		DamageAmount *= GetHitZoneMultiplier(Zone);
+		bHeadshot = Zone == EHitZone::Head;
+		INFO_LOG(TEXT("[Server] %s hit by %s: zone=%s damage=%.1f"), *GetName(), *GetNameSafe(DamageCauser), *UEnum::GetValueAsString(Zone), DamageAmount);
+	}
+
 	const float Applied = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	if (Applied <= 0.f) return 0.f;
+
+	// 헤드샷은 쏜 사람에게만 알린다 (ServerFire가 DamageCauser로 사격자 캐릭터를 넘긴다)
+	ATPSCharacter* Shooter = Cast<ATPSCharacter>(DamageCauser);
+	if (bHeadshot && IsValid(Shooter))
+	{
+		Shooter->ClientNotifyHeadshot();
+	}
 
 	const float OldHealth = Health;
 	Health = FMath::Clamp(Health - Applied, 0.f, MaxHealth);
@@ -708,6 +775,118 @@ float ATPSCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEv
 	}
 
 	return Applied;
+}
+
+void ATPSCharacter::ClientNotifyHeadshot_Implementation()
+{
+	LastHeadshotTime = GetWorld()->GetTimeSeconds();
+	OnHeadshotConfirmed();
+}
+
+EHitZone ATPSCharacter::GetHitZone(const FVector& ImpactPoint, const FVector& ShotDir) const
+{
+	const FVector Dir = ShotDir.GetSafeNormal();
+	if (Dir.IsNearlyZero()) return EHitZone::Body;
+
+	// 부위별 판정 캡슐 (본 구간 A-B + 반지름)
+	struct FZoneCapsule { FVector A; FVector B; float Radius; EHitZone Zone; };
+	TArray<FZoneCapsule, TInlineAllocator<16>> ZoneCapsules;
+
+	// 머리: head 본에서 목 -> 머리 방향으로 HeadLength만큼
+	FVector Neck, Head;
+	if (GetBoneLocation(TEXT("neck_01"), Neck) && GetBoneLocation(TEXT("head"), Head))
+	{
+		ZoneCapsules.Add({ Head, Head + (Head - Neck).GetSafeNormal() * HeadLength, HeadRadius, EHitZone::Head });
+	}
+
+	// UE4 마네킹 스켈레톤 본 이름 (MESH_PC_xx 공통)
+	struct FBoneSegment
+	{
+		const TCHAR* From;
+		const TCHAR* To;
+		EHitZone Zone;
+	};
+	
+	static const FBoneSegment Segments[] =
+	{
+		{ TEXT("pelvis"),     TEXT("spine_03"),   EHitZone::Body },
+		{ TEXT("spine_03"),   TEXT("neck_01"),    EHitZone::Body },
+		{ TEXT("upperarm_l"), TEXT("lowerarm_l"), EHitZone::Limb },
+		{ TEXT("lowerarm_l"), TEXT("hand_l"),     EHitZone::Limb },
+		{ TEXT("upperarm_r"), TEXT("lowerarm_r"), EHitZone::Limb },
+		{ TEXT("lowerarm_r"), TEXT("hand_r"),     EHitZone::Limb },
+		{ TEXT("thigh_l"),    TEXT("calf_l"),     EHitZone::Limb },
+		{ TEXT("calf_l"),     TEXT("foot_l"),     EHitZone::Limb },
+		{ TEXT("foot_l"),     TEXT("ball_l"),     EHitZone::Limb },
+		{ TEXT("thigh_r"),    TEXT("calf_r"),     EHitZone::Limb },
+		{ TEXT("calf_r"),     TEXT("foot_r"),     EHitZone::Limb },
+		{ TEXT("foot_r"),     TEXT("ball_r"),     EHitZone::Limb },
+	};
+
+	for (const FBoneSegment& Segment : Segments)
+	{
+		FVector A, B;
+		if (!GetBoneLocation(Segment.From, A) || !GetBoneLocation(Segment.To, B)) continue;
+		ZoneCapsules.Add({ A, B, Segment.Zone == EHitZone::Body ? TorsoRadius : LimbRadius, Segment.Zone });
+	}
+
+	// 총알 경로: 캡슐 명중 지점보다 캡슐 반지름만큼 앞에서 시작해 캡슐을 완전히 빠져나갈 때까지
+	// 조준 자세의 손/팔뚝은 캡슐 밖으로 나와 있으므로, 명중 지점부터 시작하면 얼굴 앞을 가린 팔을 건너뛴다
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+	const float LeadLength = Capsule->GetScaledCapsuleRadius();
+	const float PassLength = 2.f * (Capsule->GetScaledCapsuleHalfHeight() + Capsule->GetScaledCapsuleRadius());
+	const FVector RayStart = ImpactPoint - Dir * LeadLength;
+	const FVector RayEnd = ImpactPoint + Dir * PassLength;
+
+	bool bPassedAnyZone = false;
+	EHitZone FirstZone = EHitZone::Body;		// 경로가 실제로 지나간 부위 중 가장 앞쪽 (팔이 머리를 가리면 팔)
+	float FirstAlongRay = TNumericLimits<float>::Max();
+	EHitZone NearestZone = EHitZone::Body;		// 아무 부위도 안 지나갔을 때 쓸 가장 가까운 몸통/팔다리
+	float NearestGap = TNumericLimits<float>::Max();
+
+	for (const FZoneCapsule& ZoneCapsule : ZoneCapsules)
+	{
+		FVector OnRay, OnBone;
+		FMath::SegmentDistToSegmentSafe(RayStart, RayEnd, ZoneCapsule.A, ZoneCapsule.B, OnRay, OnBone);
+		const float Gap = FVector::Dist(OnRay, OnBone) - ZoneCapsule.Radius;
+
+		if (Gap <= 0.f)
+		{
+			const float AlongRay = FVector::DotProduct(OnRay - RayStart, Dir);
+			if (AlongRay < FirstAlongRay)
+			{
+				bPassedAnyZone = true;
+				FirstAlongRay = AlongRay;
+				FirstZone = ZoneCapsule.Zone;
+			}
+		}
+		else if (ZoneCapsule.Zone != EHitZone::Head && Gap < NearestGap)
+		{
+			NearestGap = Gap;
+			NearestZone = ZoneCapsule.Zone;
+		}
+	}
+
+	return bPassedAnyZone ? FirstZone : NearestZone;
+}
+
+bool ATPSCharacter::GetBoneLocation(FName BoneName, FVector& OutLocation) const
+{
+	const USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!IsValid(MeshComp) || MeshComp->GetBoneIndex(BoneName) == INDEX_NONE) return false;
+
+	OutLocation = MeshComp->GetSocketLocation(BoneName);
+	return true;
+}
+
+float ATPSCharacter::GetHitZoneMultiplier(EHitZone Zone) const
+{
+	switch (Zone)
+	{
+	case EHitZone::Head: return HeadDamageMultiplier;
+	case EHitZone::Limb: return LimbDamageMultiplier;
+	default:             return 1.f;
+	}
 }
 
 void ATPSCharacter::OnRep_Health(float OldHealth)

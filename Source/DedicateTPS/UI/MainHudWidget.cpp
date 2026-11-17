@@ -8,6 +8,9 @@
 #include "Components/TextBlock.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Rendering/SlateRenderer.h"
+#include "Fonts/FontMeasure.h"
 #include "DedicateTPS/Player/TPSCharacter.h"
 #include "DedicateTPS/Weapon/M4Weapon.h"
 #include "DedicateTPS/Weapon/AmmoComponent.h"
@@ -138,16 +141,51 @@ bool UMainHudWidget::ShouldDrawCrosshair() const
 	return !bCrosshairOnlyWhenAiming || Character->IsAiming();
 }
 
+bool UMainHudWidget::DrawHeadshotText(const FGeometry& AllottedGeometry, FSlateWindowElementList& OutDrawElements, int32 Layer) const
+{
+	const ATPSCharacter* Character = GetOwningPlayerPawn<ATPSCharacter>();
+	const UWorld* World = GetWorld();
+	if (!Character || !World || Character->GetLastHeadshotTime() < 0.0 || HeadshotDisplayTime <= 0.f) return false;
+
+	const float Elapsed = static_cast<float>(World->GetTimeSeconds() - Character->GetLastHeadshotTime());
+	if (Elapsed > HeadshotDisplayTime) return false;
+
+	// 마지막 HeadshotFadeTime 동안 서서히 사라진다
+	const float FadeTime = FMath::Min(HeadshotFadeTime, HeadshotDisplayTime);
+	const float Alpha = FadeTime > 0.f ? FMath::Clamp((HeadshotDisplayTime - Elapsed) / FadeTime, 0.f, 1.f) : 1.f;
+
+	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), HeadshotFontSize);
+	const FVector2f TextSize = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(HeadshotText, Font);
+	const FVector2f Center = FVector2f(AllottedGeometry.GetLocalSize()) * 0.5f;
+	const FVector2f TextPos(Center.X - TextSize.X * 0.5f, Center.Y - HeadshotOffsetY - TextSize.Y);
+
+	// 그림자 먼저, 그 위에 본문
+	const FVector2f ShadowOffset(2.f, 2.f);
+	FSlateDrawElement::MakeText(OutDrawElements, Layer,
+		AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(TextPos + ShadowOffset)),
+		HeadshotText, Font, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.8f * Alpha));
+
+	FLinearColor Color = HeadshotColor;
+	Color.A *= Alpha;
+	FSlateDrawElement::MakeText(OutDrawElements, Layer,
+		AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(TextPos)),
+		HeadshotText, Font, ESlateDrawEffect::None, Color);
+
+	return true;
+}
+
 int32 UMainHudWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
 	FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
 	const int32 MaxLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-	if (!ShouldDrawCrosshair()) return MaxLayer;
-
 	const int32 Layer = MaxLayer + 1;
+
+	const bool bDrewHeadshot = DrawHeadshotText(AllottedGeometry, OutDrawElements, Layer);
+	if (!ShouldDrawCrosshair()) return bDrewHeadshot ? Layer : MaxLayer;
+
 	const FVector2f Center = FVector2f(AllottedGeometry.GetLocalSize()) * 0.5f;
 
-	auto DrawLine = [&](const FVector2f& Direction)
+	const TFunction<void(const FVector2f&)> DrawLine = [&](const FVector2f& Direction)
 	{
 		TArray<FVector2f> Points;
 		Points.Add(Center + Direction * CrosshairGap);
