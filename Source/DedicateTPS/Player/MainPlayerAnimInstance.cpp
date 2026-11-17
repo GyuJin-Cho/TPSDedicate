@@ -2,6 +2,7 @@
 #include "TPSCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "KismetAnimationLibrary.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -28,7 +29,7 @@ void UMainPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	// 원격 캐릭터는 Controller가 없으므로 ControlRotation 대신 GetBaseAimRotation 사용
 	// (Pitch는 RemoteViewPitch로 복제된 값이 들어온다)
 	const FRotator AimRotation = Character->GetBaseAimRotation();
-	Direction = CalculateDirection(Velocity, AimRotation);
+	Direction = UKismetAnimationLibrary::CalculateDirection(Velocity, AimRotation);
 
 	Falling = Character->GetCharacterMovement()->IsFalling();
 	Die = Character->IsDead();
