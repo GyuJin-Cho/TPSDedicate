@@ -4,7 +4,9 @@ Unreal Engine 5.8(소스 빌드) 기반의 **데디케이티드 서버 1:1 TPS**
 모든 판정은 서버가 하고, 클라이언트는 입력·연출·예측만 담당하는 서버 권한 구조로 만들었습니다.
 구현은 AI 에이전트(Claude Code)로 진행했고, 설계 결정·서버 검증 정책·실접속 테스트는 직접 했습니다.
 
-> 플레이 영상: _(추가 예정)_
+> 플레이 영상: [YouTube](https://youtu.be/WKpO8-oPqxM)
+>
+> [![플레이 영상](https://img.youtube.com/vi/WKpO8-oPqxM/hqdefault.jpg)](https://youtu.be/WKpO8-oPqxM)
 
 ## 게임 규칙
 
