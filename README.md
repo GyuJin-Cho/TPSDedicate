@@ -40,8 +40,10 @@ flowchart LR
 |---|---|
 | `Source/DedicateTPS/Game` | GameMode(매치 수명주기, 입장 검사, 스폰), GameState(승자 복제), PlayerState, GameInstance(접속 실패 처리) |
 | `Source/DedicateTPS/Player` | 캐릭터(사격·조준·재장전·체력·부위 데미지·피 이펙트), 커스텀 이동 컴포넌트(스프린트 예측), 애님 인스턴스 |
-| `Source/DedicateTPS/Weapon` | 무기 연출, 탄약 컴포넌트 |
+| `Source/DedicateTPS/Weapon` | 무기 연출, 탄약 컴포넌트, 무기 스탯(테이블에서 읽음) |
+| `Source/DedicateTPS/Table` | 데이터 테이블 행 구조체, 타입과 키로 행을 찾는 `UTableSubsystem` |
 | `Source/DedicateTPS/UI` | 접속 화면, HUD(헤드샷 표시 포함), 경기 상태 위젯 |
+| `Tables` | 엑셀 원본 → JSON → DataTable uasset 변환 스크립트 ([`docs/tables.md`](docs/tables.md)) |
 
 ## 네트워크에서 신경 쓴 부분
 
