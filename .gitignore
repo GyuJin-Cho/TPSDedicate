@@ -8,3 +8,11 @@
 !/README.md
 !/CLAUDE.md
 !/docs/
+!/Tables/
+
+# Content 중 데이터 테이블(작은 uasset)만 예외로 추적
+!/Content/
+/Content/*
+!/Content/Data/
+/Content/Data/*
+!/Content/Data/Tables/

@@ -1,0 +1,11 @@
+[
+	{
+		"Name": "1",
+		"StatId": 1,
+		"Damage": 20,
+		"RecoilPitchMin": 0.2,
+		"RecoilPitchMax": 0.6,
+		"RecoilYawMax": 0.35,
+		"MaxAmmo": 30
+	}
+]

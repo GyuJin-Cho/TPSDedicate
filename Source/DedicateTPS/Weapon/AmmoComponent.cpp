@@ -30,6 +30,11 @@ void UAmmoComponent::SetAmmo(int32 InAmmo)
 	OnRep_Ammo();
 }
 
+void UAmmoComponent::SetMaxAmmo(int32 InMaxAmmo)
+{
+	MaxAmmo = FMath::Max(1, InMaxAmmo);
+}
+
 bool UAmmoComponent::ConsumeAmmo()
 {
 	if (Ammo <= 0) return false;

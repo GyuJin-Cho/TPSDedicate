@@ -6,7 +6,9 @@
 #include "Particles/ParticleSystem.h"
 #include "Animation/AnimationAsset.h"
 #include "Kismet/GameplayStatics.h"
+#include "DedicateTPS/Table/TableSubsystem.h"
 #include "DedicateTPS/Utill/CHelpers.h"
+#include "DedicateTPS/Utill/Utill.h"
 
 AM4Weapon::AM4Weapon()
 {
@@ -29,6 +31,32 @@ AM4Weapon::AM4Weapon()
 
 	Muzzle->SetRelativeLocation(FVector(0.0f, 55.555556f, 6.896552f));
 	Muzzle->SetRelativeScale3D(FVector(0.1f, 0.1f, 0.1f));
+}
+
+void AM4Weapon::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// 에디터 미리보기 등 게임 월드가 아니면 테이블 서브시스템이 없다
+	const UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld()) return;
+
+	const UTableSubsystem* Tables = UTableSubsystem::Get(this);
+	const FWeaponTableRow* WeaponRow = Tables ? Tables->Find<FWeaponTableRow>(WeaponId) : nullptr;
+	const FWeaponStatTableRow* StatRow = WeaponRow ? Tables->Find<FWeaponStatTableRow>(WeaponRow->StatId) : nullptr;
+	if (StatRow == nullptr)
+	{
+		ERROR_LOG(TEXT("AM4Weapon: no stat for WeaponId %d (%s). Damage/recoil are 0"), WeaponId, *GetName());
+		return;
+	}
+
+	Stat = *StatRow;
+
+	INFO_LOG(TEXT("[%s] AM4Weapon: WeaponId %d (%s) -> StatId %d, Damage %.1f, MaxAmmo %d"),
+		HasAuthority() ? TEXT("Server") : TEXT("Client"), WeaponId, *WeaponRow->WeaponName, Stat.StatId, Stat.Damage, Stat.MaxAmmo);
+
+	// 컴포넌트 BeginPlay(서버가 탄을 가득 채움)보다 먼저 정해야 한다
+	Ammo->SetMaxAmmo(Stat.MaxAmmo);
 }
 
 void AM4Weapon::PlayFireEffects()

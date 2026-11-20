@@ -28,6 +28,9 @@ public:
 	// 서버 전용
 	void SetAmmo(int32 InAmmo);
 
+	// 무기가 테이블 값으로 BeginPlay 전에 호출한다 (서버와 클라 모두)
+	void SetMaxAmmo(int32 InMaxAmmo);
+
 	// 서버 전용. 한 발 차감에 성공하면 true
 	bool ConsumeAmmo();
 
@@ -42,7 +45,8 @@ private:
 	UFUNCTION()
 	void OnRep_Ammo();
 
-	UPROPERTY(EditDefaultsOnly, Category = "Ammo", meta = (ClampMin = "1"))
+	// 무기 스탯 테이블(WeaponStatTable.MaxAmmo)에서 채운다. 복제하지 않고 서버와 클라가 각자 테이블에서 읽는다
+	UPROPERTY(VisibleInstanceOnly, Category = "Ammo")
 	int32 MaxAmmo = 30;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Ammo)

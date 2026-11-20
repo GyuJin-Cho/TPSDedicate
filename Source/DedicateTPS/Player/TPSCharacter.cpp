@@ -545,12 +545,14 @@ void ATPSCharacter::FireOnce()
 void ATPSCharacter::ApplyRecoil()
 {
 	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC) return;
+	if (!PC || !IsValid(Weapon)) return;
+
+	const FWeaponStatTableRow& Stat = Weapon->GetStat();
 
 	// AddControllerPitchInput은 입력 스케일이 곱해지므로 각도를 직접 더한다
 	FRotator ControlRotation = PC->GetControlRotation();
-	ControlRotation.Pitch += FMath::FRandRange(RecoilPitchMin, RecoilPitchMax);
-	ControlRotation.Yaw += FMath::FRandRange(-RecoilYawMax, RecoilYawMax);
+	ControlRotation.Pitch += FMath::FRandRange(Stat.RecoilPitchMin, Stat.RecoilPitchMax);
+	ControlRotation.Yaw += FMath::FRandRange(-Stat.RecoilYawMax, Stat.RecoilYawMax);
 	PC->SetControlRotation(ControlRotation);
 
 	if (FireCameraShake && PC->PlayerCameraManager)
@@ -628,7 +630,7 @@ void ATPSCharacter::ServerFire_Implementation(FVector_NetQuantize TraceStart, FV
 
 	if (bHit && Hit.GetActor())
 	{
-		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Dir, Hit, GetController(), this, nullptr);
+		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Weapon->GetStat().Damage, Dir, Hit, GetController(), this, nullptr);
 	}
 
 	ATPSCharacter* HitCharacter = bHit ? Cast<ATPSCharacter>(Hit.GetActor()) : nullptr;

@@ -230,16 +230,7 @@ protected:
 	float AimInterpSpeed = 12.f;
 
 	// ---------- Recoil ----------
-	// 한 발마다 조준점이 위로 튀는 각도(도). 음수를 넣으면 아래로도 튄다
-	UPROPERTY(EditDefaultsOnly, Category = "Recoil")
-	float RecoilPitchMin = 0.2f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Recoil")
-	float RecoilPitchMax = 0.6f;
-
-	// 한 발마다 좌우로 튀는 최대 각도(도). -값 ~ +값에서 랜덤
-	UPROPERTY(EditDefaultsOnly, Category = "Recoil")
-	float RecoilYawMax = 0.35f;
+	// 반동 각도는 무기 스탯 테이블(WeaponStatTable)에서 읽는다
 
 	// 사격 시 카메라 흔들림 (BP에서 Camera Shake 에셋 지정, 비우면 흔들림 없음)
 	// 크게 흔들면 화면 중앙과 판정 방향이 잠깐 어긋나 보이므로 작게 둔다
@@ -271,8 +262,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Blood")
 	FVector BloodScale = FVector(1.f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Fire")
-	float Damage = 20.f;
+	// 데미지는 무기 스탯 테이블(WeaponStatTable)에서 읽는다
 
 	UPROPERTY(EditDefaultsOnly, Category = "Fire")
 	float FireRange = 10000.f;
@@ -285,7 +275,7 @@ protected:
 	bool bDrawDebugTrace = false;
 
 	// ---------- Hit Zone ----------
-	// Damage에 곱한다. 기본값은 머리 100(즉사), 몸통 20, 팔다리 10
+	// 무기 스탯의 Damage에 곱한다. M4(20) 기준 머리 100(즉사), 몸통 20, 팔다리 10
 	UPROPERTY(EditDefaultsOnly, Category = "Fire|HitZone")
 	float HeadDamageMultiplier = 5.f;
 

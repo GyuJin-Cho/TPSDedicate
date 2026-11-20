@@ -68,6 +68,10 @@ UnrealEditor-Win64-DebugGame.exe <uproject 경로> 127.0.0.1:7777 -game -nullrhi
 
 캐릭터·전투·사격·재장전 코드를 수정하기 전에 `docs/combat.md`를 먼저 읽는다.
 
+### 데이터 테이블
+
+엑셀 → JSON → DataTable 파이프라인(`Tables/`)과 `UTableSubsystem` 조회는 `docs/tables.md`를 먼저 읽는다. 엑셀과 JSON이 원본이고 uasset은 `Tables\BuildTables.bat`으로 만든다(에디터를 끈 상태).
+
 ### 알려진 이슈
 
 코드 리뷰 전에 `docs/known-issues.md`를 읽고, 거기 있는 항목은 새 문제로 다루지 않는다.
@@ -85,7 +89,7 @@ UnrealEditor-Win64-DebugGame.exe <uproject 경로> 127.0.0.1:7777 -game -nullrhi
 
 ## 저장소
 
-GitHub: `GyuJin-Cho/TPSDedicate` (public). 소스 전용 레포이고 Git LFS는 쓰지 않는다. `Content`는 레포에 없으므로 BP와 맵 변경은 버전 관리되지 않는다.
+GitHub: `GyuJin-Cho/TPSDedicate` (public). 소스 전용 레포이고 Git LFS는 쓰지 않는다. `Content`는 레포에 없으므로 BP와 맵 변경은 버전 관리되지 않는다. 예외로 `Content/Data/Tables`(데이터 테이블 uasset)만 추적한다.
 
 `.gitignore`는 화이트리스트 방식이다. 루트에 새 파일이나 폴더를 추가해 추적하려면 `.gitignore`에 `!/이름`을 추가해야 한다.
 

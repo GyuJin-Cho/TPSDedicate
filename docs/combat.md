@@ -16,7 +16,7 @@ C++에서 상속 컴포넌트의 클래스를 바꾸면(`SetDefaultSubobjectClas
 
 재장전은 `ReloadMontage`(BP에서 지정)를 재생하고, 탄약은 몽타주의 `Reload Ammo` 노티파이(`UAnimNotify_ReloadAmmo`, 마커 전용) 시점에 서버가 채운다. 서버는 노티파이 발생을 기다리지 않고 몽타주 에셋에서 노티파이 시간을 읽어 타이머로 처리한다(데디 서버 애니메이션 틱은 이동 RPC에 묶여 있음). 재장전 중에는 조준과 사격이 막히고(`bIsReloading`, COND_SkipOwner, 서버도 `ServerFire`에서 검사), 서버는 RPC 지연을 고려해 조금 일찍 재장전을 끝낸다. 끝날 때 우클릭이 눌려 있으면 자동으로 견착한다. ABP는 `Fire || Reload || Aim`일 때만 `UpperBody` 슬롯 분기를 평가하므로, 상체 몽타주를 조준 밖에서 재생하려면 애님 인스턴스의 해당 변수를 채워야 한다.
 
-반동은 `ApplyRecoil`이 사격 직후 ControlRotation에 랜덤 각도를 더하는 방식이다. 카메라가 ControlRotation을 그대로 바라보므로 화면 중앙 크로스헤어(`UMainHudWidget`이 NativePaint로 그림)가 판정 방향과 일치한다. 카메라 셰이크는 화면만 흔들고 판정에는 영향이 없다.
+데미지·반동 각도·탄창 크기는 무기 스탯 테이블에서 읽는다(`docs/tables.md`). 반동은 `ApplyRecoil`이 사격 직후 ControlRotation에 랜덤 각도를 더하는 방식이다. 카메라가 ControlRotation을 그대로 바라보므로 화면 중앙 크로스헤어(`UMainHudWidget`이 NativePaint로 그림)가 판정 방향과 일치한다. 카메라 셰이크는 화면만 흔들고 판정에는 영향이 없다.
 
 탄이 없을 때 사격하면 `FireOnce`가 `EmptyFireMontage`(BP에서 지정)를 로컬에서만 재생하고 멈춘다. 서버에 보내지 않으므로 다른 클라에는 보이지 않는다. 탄약은 복제값 기준이라 마지막 발 직후 복제가 늦으면 빈 격발 대신 한 발이 더 연출될 수 있다(서버가 거부).
 

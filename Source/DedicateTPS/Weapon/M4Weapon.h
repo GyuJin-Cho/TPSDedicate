@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "DedicateTPS/Table/TableRows.h"
 #include "M4Weapon.generated.h"
 
 // UE5_CPP_Project에서 이주한 무기 (CoreRedirects로 연결)
@@ -19,6 +20,12 @@ class DEDICATETPS_API AM4Weapon : public AActor
 public:
 	AM4Weapon();
 
+	// WeaponId로 테이블을 읽어 Stat과 탄창 크기를 채운다 (서버와 클라 각자 읽는다)
+	virtual void PostInitializeComponents() override;
+
+	// 데미지, 반동, 탄창 크기. 테이블을 못 읽었으면 전부 0
+	const FWeaponStatTableRow& GetStat() const { return Stat; }
+
 	// 총구 화염, 탄피, 총 애니메이션. 데디케이티드 서버에서는 아무것도 하지 않는다
 	void PlayFireEffects();
 
@@ -31,6 +38,15 @@ public:
 	FORCEINLINE class UAmmoComponent* GetAmmo() const { return Ammo; }
 
 private:
+	// WeaponTable의 키. 무기 BP마다 지정한다 (M4 = 1)
+	// 복제하지 않는다. 클래스 기본값이라 서버와 클라가 같은 값을 갖는다
+	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
+	int32 WeaponId = 1;
+
+	// WeaponId → WeaponTable.StatId → WeaponStatTable 행의 사본
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Weapon")
+	FWeaponStatTableRow Stat;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<class USkeletalMeshComponent> Mesh;
 
